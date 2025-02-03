@@ -21,16 +21,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/tests/v3/framework/config"
 	"go.etcd.io/etcd/tests/v3/framework/testutils"
-
-	"github.com/stretchr/testify/require"
 )
 
-var tokenTTL = time.Second
-var defaultAuthToken = fmt.Sprintf("jwt,pub-key=%s,priv-key=%s,sign-method=RS256,ttl=%s",
-	mustAbsPath("../fixtures/server.crt"), mustAbsPath("../fixtures/server.key.insecure"), tokenTTL)
+var (
+	tokenTTL         = time.Second * 3
+	defaultAuthToken = fmt.Sprintf("jwt,pub-key=%s,priv-key=%s,sign-method=RS256,ttl=%s",
+		mustAbsPath("../fixtures/server.crt"), mustAbsPath("../fixtures/server.key.insecure"), tokenTTL)
+)
 
 const (
 	PermissionDenied      = "etcdserver: permission denied"
@@ -76,9 +79,9 @@ func TestAuthDisable(t *testing.T) {
 		// confirm put succeeded
 		resp, err := cc.Get(ctx, "hoo", config.GetOptions{})
 		require.NoError(t, err)
-		if len(resp.Kvs) != 1 || string(resp.Kvs[0].Key) != "hoo" || string(resp.Kvs[0].Value) != "bar" {
-			t.Fatalf("want key value pair 'hoo', 'bar' but got %+v", resp.Kvs)
-		}
+		require.Lenf(t, resp.Kvs, 1, "want key value pair 'hoo', 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "hoo", string(resp.Kvs[0].Key), "want key value pair 'hoo', 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "bar", string(resp.Kvs[0].Value), "want key value pair 'hoo', 'bar' but got %+v", resp.Kvs)
 	})
 }
 
@@ -94,8 +97,10 @@ func TestAuthGracefulDisable(t *testing.T) {
 		donec := make(chan struct{})
 		rootAuthClient := testutils.MustClient(clus.Client(WithAuth(rootUserName, rootPassword)))
 
+		startedC := make(chan struct{}, 1)
 		go func() {
 			defer close(donec)
+			defer close(startedC)
 			// sleep a bit to let the watcher connects while auth is still enabled
 			time.Sleep(time.Second)
 			// now disable auth...
@@ -109,9 +114,12 @@ func TestAuthGracefulDisable(t *testing.T) {
 				t.Errorf("failed to restart member %v", err)
 				return
 			}
+			startedC <- struct{}{}
 			// the watcher should still work after reconnecting
-			require.NoErrorf(t, rootAuthClient.Put(ctx, "key", "value", config.PutOptions{}), "failed to put key value")
+			assert.NoErrorf(t, rootAuthClient.Put(ctx, "key", "value", config.PutOptions{}), "failed to put key value")
 		}()
+
+		<-startedC
 
 		wCtx, wCancel := context.WithCancel(ctx)
 		defer wCancel()
@@ -170,9 +178,9 @@ func TestAuthRoleUpdate(t *testing.T) {
 		// confirm put succeeded
 		resp, err := testUserAuthClient.Get(ctx, "hoo", config.GetOptions{})
 		require.NoError(t, err)
-		if len(resp.Kvs) != 1 || string(resp.Kvs[0].Key) != "hoo" || string(resp.Kvs[0].Value) != "bar" {
-			t.Fatalf("want key value pair 'hoo' 'bar' but got %+v", resp.Kvs)
-		}
+		require.Lenf(t, resp.Kvs, 1, "want key value pair 'hoo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "hoo", string(resp.Kvs[0].Key), "want key value pair 'hoo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "bar", string(resp.Kvs[0].Value), "want key value pair 'hoo' 'bar' but got %+v", resp.Kvs)
 		// revoke the newly granted key
 		_, err = rootAuthClient.RoleRevokePermission(ctx, testRoleName, "hoo", "")
 		require.NoError(t, err)
@@ -181,9 +189,9 @@ func TestAuthRoleUpdate(t *testing.T) {
 		// confirm a key still granted can be accessed
 		resp, err = testUserAuthClient.Get(ctx, "foo", config.GetOptions{})
 		require.NoError(t, err)
-		if len(resp.Kvs) != 1 || string(resp.Kvs[0].Key) != "foo" || string(resp.Kvs[0].Value) != "bar" {
-			t.Fatalf("want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
-		}
+		require.Lenf(t, resp.Kvs, 1, "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "foo", string(resp.Kvs[0].Key), "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "bar", string(resp.Kvs[0].Value), "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
 	})
 }
 
@@ -206,9 +214,9 @@ func TestAuthUserDeleteDuringOps(t *testing.T) {
 		// confirm put succeeded
 		resp, err := testUserAuthClient.Get(ctx, "foo", config.GetOptions{})
 		require.NoError(t, err)
-		if len(resp.Kvs) != 1 || string(resp.Kvs[0].Key) != "foo" || string(resp.Kvs[0].Value) != "bar" {
-			t.Fatalf("want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
-		}
+		require.Lenf(t, resp.Kvs, 1, "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "foo", string(resp.Kvs[0].Key), "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "bar", string(resp.Kvs[0].Value), "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
 		// delete the user
 		_, err = rootAuthClient.UserDelete(ctx, testUserName)
 		require.NoError(t, err)
@@ -237,9 +245,9 @@ func TestAuthRoleRevokeDuringOps(t *testing.T) {
 		// confirm put succeeded
 		resp, err := testUserAuthClient.Get(ctx, "foo", config.GetOptions{})
 		require.NoError(t, err)
-		if len(resp.Kvs) != 1 || string(resp.Kvs[0].Key) != "foo" || string(resp.Kvs[0].Value) != "bar" {
-			t.Fatalf("want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
-		}
+		require.Lenf(t, resp.Kvs, 1, "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "foo", string(resp.Kvs[0].Key), "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "bar", string(resp.Kvs[0].Value), "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
 		// create a new role
 		_, err = rootAuthClient.RoleAdd(ctx, "test-role2")
 		require.NoError(t, err)
@@ -255,9 +263,9 @@ func TestAuthRoleRevokeDuringOps(t *testing.T) {
 		// confirm put succeeded
 		resp, err = testUserAuthClient.Get(ctx, "hoo", config.GetOptions{})
 		require.NoError(t, err)
-		if len(resp.Kvs) != 1 || string(resp.Kvs[0].Key) != "hoo" || string(resp.Kvs[0].Value) != "bar" {
-			t.Fatalf("want key value pair 'hoo' 'bar' but got %+v", resp.Kvs)
-		}
+		require.Lenf(t, resp.Kvs, 1, "want key value pair 'hoo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "hoo", string(resp.Kvs[0].Key), "want key value pair 'hoo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "bar", string(resp.Kvs[0].Value), "want key value pair 'hoo' 'bar' but got %+v", resp.Kvs)
 		// revoke a role from the user
 		_, err = rootAuthClient.UserRevokeRole(ctx, testUserName, testRoleName)
 		require.NoError(t, err)
@@ -269,9 +277,9 @@ func TestAuthRoleRevokeDuringOps(t *testing.T) {
 		// confirm put succeeded
 		resp, err = testUserAuthClient.Get(ctx, "hoo", config.GetOptions{})
 		require.NoError(t, err)
-		if len(resp.Kvs) != 1 || string(resp.Kvs[0].Key) != "hoo" || string(resp.Kvs[0].Value) != "bar2" {
-			t.Fatalf("want key value pair 'hoo' 'bar2' but got %+v", resp.Kvs)
-		}
+		require.Lenf(t, resp.Kvs, 1, "want key value pair 'hoo' 'bar2' but got %+v", resp.Kvs)
+		require.Equalf(t, "hoo", string(resp.Kvs[0].Key), "want key value pair 'hoo' 'bar2' but got %+v", resp.Kvs)
+		require.Equalf(t, "bar2", string(resp.Kvs[0].Value), "want key value pair 'hoo' 'bar2' but got %+v", resp.Kvs)
 	})
 }
 
@@ -293,9 +301,9 @@ func TestAuthWriteKey(t *testing.T) {
 		require.NoError(t, rootAuthClient.Put(ctx, "foo", "bar", config.PutOptions{}))
 		resp, err := rootAuthClient.Get(ctx, "foo", config.GetOptions{})
 		require.NoError(t, err)
-		if len(resp.Kvs) != 1 || string(resp.Kvs[0].Key) != "foo" || string(resp.Kvs[0].Value) != "bar" {
-			t.Fatalf("want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
-		}
+		require.Lenf(t, resp.Kvs, 1, "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "foo", string(resp.Kvs[0].Key), "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
+		require.Equalf(t, "bar", string(resp.Kvs[0].Value), "want key value pair 'foo' 'bar' but got %+v", resp.Kvs)
 		// try invalid user
 		_, err = clus.Client(WithAuth("a", "b"))
 		require.ErrorContains(t, err, AuthenticationFailed)
@@ -305,9 +313,9 @@ func TestAuthWriteKey(t *testing.T) {
 		// confirm put succeeded
 		resp, err = testUserAuthClient.Get(ctx, "foo", config.GetOptions{})
 		require.NoError(t, err)
-		if len(resp.Kvs) != 1 || string(resp.Kvs[0].Key) != "foo" || string(resp.Kvs[0].Value) != "bar2" {
-			t.Fatalf("want key value pair 'foo' 'bar2' but got %+v", resp.Kvs)
-		}
+		require.Lenf(t, resp.Kvs, 1, "want key value pair 'foo' 'bar2' but got %+v", resp.Kvs)
+		require.Equalf(t, "foo", string(resp.Kvs[0].Key), "want key value pair 'foo' 'bar2' but got %+v", resp.Kvs)
+		require.Equalf(t, "bar2", string(resp.Kvs[0].Value), "want key value pair 'foo' 'bar2' but got %+v", resp.Kvs)
 
 		// try bad password
 		_, err = clus.Client(WithAuth(testUserName, "badpass"))
@@ -378,14 +386,12 @@ func TestAuthTxn(t *testing.T) {
 				// keys with 2 suffix are granted to test-user, see Line 399
 				grantedKeys := []string{"c2", "s2", "f2"}
 				for _, key := range keys {
-					if err := cc.Put(ctx, key, "v", config.PutOptions{}); err != nil {
-						t.Fatal(err)
-					}
+					err := cc.Put(ctx, key, "v", config.PutOptions{})
+					require.NoError(t, err)
 				}
 				for _, key := range grantedKeys {
-					if err := cc.Put(ctx, key, "v", config.PutOptions{}); err != nil {
-						t.Fatal(err)
-					}
+					err := cc.Put(ctx, key, "v", config.PutOptions{})
+					require.NoError(t, err)
 				}
 
 				require.NoErrorf(t, setupAuth(cc, []authRole{testRole}, []authUser{rootUser, testUser}), "failed to enable auth")
@@ -394,16 +400,15 @@ func TestAuthTxn(t *testing.T) {
 
 				// grant keys to test-user
 				for _, key := range grantedKeys {
-					if _, err := rootAuthClient.RoleGrantPermission(ctx, testRoleName, key, "", clientv3.PermissionType(clientv3.PermReadWrite)); err != nil {
-						t.Fatal(err)
-					}
+					_, err := rootAuthClient.RoleGrantPermission(ctx, testRoleName, key, "", clientv3.PermissionType(clientv3.PermReadWrite))
+					require.NoError(t, err)
 				}
 				for _, req := range reqs {
 					resp, err := testUserAuthClient.Txn(ctx, req.compare, req.ifSuccess, req.ifFail, config.TxnOptions{
 						Interactive: true,
 					})
 					if req.expectError {
-						require.Contains(t, err.Error(), req.expectResults[0])
+						require.ErrorContains(t, err, req.expectResults[0])
 					} else {
 						require.NoError(t, err)
 						require.Equal(t, req.expectResults, getRespValues(resp))
@@ -468,9 +473,9 @@ func TestAuthLeaseKeepAlive(t *testing.T) {
 
 		gresp, err := rootAuthClient.Get(ctx, "key", config.GetOptions{})
 		require.NoError(t, err)
-		if len(gresp.Kvs) != 1 || string(gresp.Kvs[0].Key) != "key" || string(gresp.Kvs[0].Value) != "value" {
-			t.Fatalf("want kv pair ('key', 'value') but got %v", gresp.Kvs)
-		}
+		require.Lenf(t, gresp.Kvs, 1, "want kv pair ('key', 'value') but got %v", gresp.Kvs)
+		require.Equalf(t, "key", string(gresp.Kvs[0].Key), "want kv pair ('key', 'value') but got %v", gresp.Kvs)
+		require.Equalf(t, "value", string(gresp.Kvs[0].Value), "want kv pair ('key', 'value') but got %v", gresp.Kvs)
 	})
 }
 
@@ -561,9 +566,8 @@ func TestAuthLeaseGrantLeases(t *testing.T) {
 				leaseID := resp.ID
 				lresp, err := rootAuthClient.Leases(ctx)
 				require.NoError(t, err)
-				if len(lresp.Leases) != 1 || lresp.Leases[0].ID != leaseID {
-					t.Fatalf("want %v leaseID but got %v leases", leaseID, lresp.Leases)
-				}
+				require.Lenf(t, lresp.Leases, 1, "want %v leaseID but got %v leases", leaseID, lresp.Leases)
+				require.Equalf(t, lresp.Leases[0].ID, leaseID, "want %v leaseID but got %v leases", leaseID, lresp.Leases)
 			})
 		})
 	}
@@ -600,30 +604,30 @@ func TestAuthMemberRemove(t *testing.T) {
 		require.NoErrorf(t, setupAuth(cc, []authRole{testRole}, []authUser{rootUser, testUser}), "failed to enable auth")
 		rootAuthClient := testutils.MustClient(clus.Client(WithAuth(rootUserName, rootPassword)))
 
-		memberId, clusterId := memberToRemove(ctx, t, rootAuthClient, clusterSize)
-		delete(memberIDToEndpoints, memberId)
+		memberID, clusterID := memberToRemove(ctx, t, rootAuthClient, clusterSize)
+		delete(memberIDToEndpoints, memberID)
 		endpoints := make([]string, 0, len(memberIDToEndpoints))
 		for _, ep := range memberIDToEndpoints {
 			endpoints = append(endpoints, ep)
 		}
 		testUserAuthClient := testutils.MustClient(clus.Client(WithAuth(testUserName, testPassword)))
 		// ordinary user cannot remove a member
-		_, err := testUserAuthClient.MemberRemove(ctx, memberId)
+		_, err := testUserAuthClient.MemberRemove(ctx, memberID)
 		require.ErrorContains(t, err, PermissionDenied)
 
 		// root can remove a member, building a client excluding removed member endpoint
 		rootAuthClient2 := testutils.MustClient(clus.Client(WithAuth(rootUserName, rootPassword), WithEndpoints(endpoints)))
-		resp, err := rootAuthClient2.MemberRemove(ctx, memberId)
+		resp, err := rootAuthClient2.MemberRemove(ctx, memberID)
 		require.NoError(t, err)
-		require.Equal(t, resp.Header.ClusterId, clusterId)
+		require.Equal(t, resp.Header.ClusterId, clusterID)
 		found := false
 		for _, member := range resp.Members {
-			if member.ID == memberId {
+			if member.ID == memberID {
 				found = true
 				break
 			}
 		}
-		require.False(t, found, "expect removed member not found in member remove response")
+		require.Falsef(t, found, "expect removed member not found in member remove response")
 	})
 }
 

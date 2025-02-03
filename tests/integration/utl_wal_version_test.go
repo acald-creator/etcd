@@ -21,6 +21,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/client/pkg/v3/testutil"
@@ -37,9 +38,7 @@ func TestEtcdVersionFromWAL(t *testing.T) {
 		"Wal creation tests are depending on embedded etcd server so are integration-level tests.")
 	cfg := integration.NewEmbedConfig(t, "default")
 	srv, err := embed.StartEtcd(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	select {
 	case <-srv.Server.ReadyNotify():
 	case <-time.After(3 * time.Second):
@@ -50,7 +49,7 @@ func TestEtcdVersionFromWAL(t *testing.T) {
 	// with the cluster's minimum version. As it's updated asynchronously,
 	// it could not be updated in time before close. Wait for it to become
 	// ready.
-	if err := waitForClusterVersionReady(srv); err != nil {
+	if err = waitForClusterVersionReady(srv); err != nil {
 		srv.Close()
 		t.Fatalf("failed to wait for cluster version to become ready: %v", err)
 	}
@@ -76,16 +75,12 @@ func TestEtcdVersionFromWAL(t *testing.T) {
 	srv.Close()
 
 	w, err := wal.Open(zap.NewNop(), cfg.Dir+"/member/wal", walpb.Snapshot{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer w.Close()
 
 	walVersion, err := wal.ReadWALVersion(w)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, &semver.Version{Major: 3, Minor: 6}, walVersion.MinimalEtcdVersion())
+	require.NoError(t, err)
+	assert.Equal(t, &semver.Version{Major: 3, Minor: 5}, walVersion.MinimalEtcdVersion())
 }
 
 func waitForClusterVersionReady(srv *embed.Etcd) error {

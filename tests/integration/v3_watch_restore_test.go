@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/tests/v3/framework/config"
 	"go.etcd.io/etcd/tests/v3/framework/integration"
@@ -65,11 +67,10 @@ func TestV3WatchRestoreSnapshotUnsync(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	wStream, errW := integration.ToGRPC(clus.Client(0)).Watch.Watch(ctx)
-	if errW != nil {
-		t.Fatal(errW)
-	}
+	require.NoError(t, errW)
 	if err := wStream.Send(&pb.WatchRequest{RequestUnion: &pb.WatchRequest_CreateRequest{
-		CreateRequest: &pb.WatchCreateRequest{Key: []byte("foo"), StartRevision: 5}}}); err != nil {
+		CreateRequest: &pb.WatchCreateRequest{Key: []byte("foo"), StartRevision: 5},
+	}}); err != nil {
 		t.Fatalf("wStream.Send error: %v", err)
 	}
 	wresp, errR := wStream.Recv()
@@ -82,7 +83,7 @@ func TestV3WatchRestoreSnapshotUnsync(t *testing.T) {
 
 	clus.Members[0].InjectPartition(t, clus.Members[1:]...)
 	initialLead := clus.WaitMembersForLeader(t, clus.Members[1:]) + 1
-	t.Logf("elected lead: %v", clus.Members[initialLead].Server.MemberId())
+	t.Logf("elected lead: %v", clus.Members[initialLead].Server.MemberID())
 	t.Logf("sleeping for 2 seconds")
 	time.Sleep(2 * time.Second)
 	t.Logf("sleeping for 2 seconds DONE")
@@ -110,7 +111,9 @@ func TestV3WatchRestoreSnapshotUnsync(t *testing.T) {
 	//
 	// Since there is no way to confirm server has compacted the log, we
 	// use log monitor to watch and expect "compacted Raft logs" content.
-	expectMemberLog(t, clus.Members[initialLead], 5*time.Second, "compacted Raft logs", 2)
+	// In v3.6 we no longer generates "compacted Raft logs" log as raft compaction happens independently to snapshot.
+	// For now let's use snapshot log which should be equivalent to compaction.
+	expectMemberLog(t, clus.Members[initialLead], 5*time.Second, "saved snapshot to disk", 2)
 
 	// After RecoverPartition, leader L will send snapshot to slow F_m0
 	// follower, because F_m0(index:8) is 'out of date' compared to

@@ -15,15 +15,16 @@
 package schema
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
-	"go.etcd.io/etcd/api/v3/membershippb"
 	"go.etcd.io/etcd/api/v3/version"
 	"go.etcd.io/etcd/server/v3/storage/backend"
 	betesting "go.etcd.io/etcd/server/v3/storage/backend/testing"
@@ -185,7 +186,7 @@ func TestMigrate(t *testing.T) {
 			version:       version.V3_6,
 			targetVersion: version.V3_5,
 			walEntries: []etcdserverpb.InternalRaftRequest{
-				{ClusterVersionSet: &membershippb.ClusterVersionSetRequest{Ver: "3.6.0"}},
+				{DowngradeVersionTest: &etcdserverpb.DowngradeVersionTestRequest{Ver: "3.6.0"}},
 			},
 			expectVersion:  &version.V3_6,
 			expectError:    true,
@@ -218,7 +219,7 @@ func TestMigrate(t *testing.T) {
 			if (err != nil) != tc.expectError {
 				t.Errorf("Migrate(lg, tx, %q) = %+v, expected error: %v", tc.targetVersion, err, tc.expectError)
 			}
-			if err != nil && err.Error() != tc.expectErrorMsg {
+			if err != nil && !strings.Contains(err.Error(), tc.expectErrorMsg) {
 				t.Errorf("Migrate(lg, tx, %q) = %q, expected error message: %q", tc.targetVersion, err, tc.expectErrorMsg)
 			}
 			v := UnsafeReadStorageVersion(b.BatchTx())
@@ -298,9 +299,7 @@ func setupBackendData(t *testing.T, ver semver.Version, overrideKeys func(tx bac
 	t.Helper()
 	be, tmpPath := betesting.NewTmpBackend(t, time.Microsecond, 10)
 	tx := be.BatchTx()
-	if tx == nil {
-		t.Fatal("batch tx is nil")
-	}
+	require.NotNilf(t, tx, "batch tx is nil")
 	tx.Lock()
 	UnsafeCreateMetaBucket(tx)
 	if overrideKeys != nil {
